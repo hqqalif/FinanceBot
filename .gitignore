@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+data/
+credentials.json
+oauth-credentials.json
+tokenauth.ts
+token.json
