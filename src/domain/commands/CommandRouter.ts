@@ -13,8 +13,10 @@ const BALANCE_PATTERN = /^\/balance$/;
 const HELP_PATTERN = /^\/halo$/;
 const DELETE_PATTERN = /^\/delete\s+(?<currency>[A-Za-z]{3})$/;
 const CONFIRM_DELETE_PATTERN = /^CONFIRM DELETE\s+(?<currency>[A-Za-z]{3})$/i;
-const REPORT_PATTERN = /^\/report(?:\s+(?<period>\d{2}-\d{4}))?(?:\s+(?<currency>[A-Za-z]{3}))?$/;
+const REPORT_PATTERN =
+  /^\/report(?:\s+(?<startPeriod>\d{2}-\d{4})(?:\s*-\s*(?<endPeriod>\d{2}-\d{4}))?)?(?:\s+(?<currency>[A-Za-z]{3}))?$/;
 const PERIOD_LABEL_PATTERN = /^(?<month>\d{2})-(?<year>\d{4})$/;
+const MAX_REPORT_MONTHS = 24;
 
 const ZERO_DECIMAL_CURRENCIES = new Set(["IDR", "JPY", "KRW", "VND", "CLP"]);
 const DELETE_CONFIRMATION_TTL_MS = 5 * 60 * 1000;
@@ -40,7 +42,8 @@ export class CommandRouter {
     if (openingMatch?.groups) return this.setOpeningBalance(message.senderId, openingMatch.groups);
 
     const addMatch = ADD_PATTERN.exec(text);
-    if (addMatch?.groups) return this.addFunds(message.senderId, addMatch.groups, message.messageId);
+    if (addMatch?.groups)
+      return this.addFunds(message.senderId, addMatch.groups, message.messageId, message.receivedAt);
 
     const deleteMatch = DELETE_PATTERN.exec(text);
     if (deleteMatch?.groups) return this.initiateWalletDeletion(message.senderId, deleteMatch.groups);
@@ -101,6 +104,7 @@ export class CommandRouter {
     userWhatsAppId: string,
     groups: Record<string, string>,
     sourceMessageId: string,
+    occurredAt: Date,
   ): Promise<string> {
     const currency = groups.currency.toUpperCase();
 
@@ -108,7 +112,7 @@ export class CommandRouter {
       const amountMinor = parseSpendingCommand(`Add funds, Setup, ${groups.amount}`, {
         resolveCurrency: () => ({ currency, fractionDigits: this.fractionDigitsFor(currency) }),
       }).amountMinor;
-      await this.ledger.addFunds(userWhatsAppId, currency, amountMinor, sourceMessageId);
+      await this.ledger.addFunds(userWhatsAppId, currency, amountMinor, sourceMessageId, occurredAt);
       return `Saldo ${currency} berhasil ditambah.`;
     } catch (error) {
       if (error instanceof SpendingCommandError || error instanceof LedgerValidationError) {
@@ -127,7 +131,7 @@ export class CommandRouter {
     const hasWallet = balances.some((balance) => balance.currency === currency);
 
     if (!hasWallet) {
-      return `❌ Kamu tidak punya wallet aktif untuk ${currency}.`;
+      return `Kamu tidak punya wallet aktif untuk ${currency}.`;
     }
 
     this.pendingWalletDeletions.set(userWhatsAppId, {
@@ -136,8 +140,7 @@ export class CommandRouter {
     });
 
     return (
-      `⚠️ *PERINGATAN:* Ini akan menghapus permanen wallet ${currency} kamu beserta SEMUA transaksi terkait.\n` +
-      `Balas dengan *"CONFIRM DELETE ${currency}"* untuk melanjutkan.`
+      `Balas dengan *"CONFIRM DELETE ${currency}"* untuk menghapus`
     );
   }
 
@@ -156,7 +159,7 @@ export class CommandRouter {
 
     try {
       await this.ledger.deleteWallet(userWhatsAppId, currency);
-      return `🗑️ *Wallet Berhasil Dihapus*\n\nWallet *${currency}* kamu beserta semua catatannya sudah dihapus dari akun.`;
+      return `Saldo ${currency} beserta semua catatannya sudah dihapus dari akun.`;
     } catch (error) {
       if (error instanceof LedgerValidationError) {
         return `${error.message}\n${this.helpText()}`;
@@ -174,46 +177,90 @@ export class CommandRouter {
     }
 
     const now = new Date();
-    const periodLabel =
-      groups.period ?? `${String(now.getUTCMonth() + 1).padStart(2, "0")}-${now.getUTCFullYear()}`;
-    const periodMatch = PERIOD_LABEL_PATTERN.exec(periodLabel);
+    const startPeriodLabel =
+      groups.startPeriod ?? `${String(now.getUTCMonth() + 1).padStart(2, "0")}-${now.getUTCFullYear()}`;
+    const endPeriodLabel = groups.endPeriod;
 
-    if (!periodMatch?.groups) {
+    const startMatch = PERIOD_LABEL_PATTERN.exec(startPeriodLabel);
+    if (!startMatch?.groups) {
       return `Format bulan tidak valid. Gunakan MM-YYYY, contoh: 07-2026.\n${this.helpText()}`;
     }
 
-    const month = Number(periodMatch.groups.month);
-    const year = Number(periodMatch.groups.year);
+    const startMonth = Number(startMatch.groups.month);
+    const startYear = Number(startMatch.groups.year);
 
-    if (month < 1 || month > 12) {
+    if (startMonth < 1 || startMonth > 12) {
       return `Bulan harus antara 01 dan 12.\n${this.helpText()}`;
     }
 
-    const periodStart = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0));
-    const periodEnd = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
+    let endMonth = startMonth;
+    let endYear = startYear;
+
+    if (endPeriodLabel) {
+      const endMatch = PERIOD_LABEL_PATTERN.exec(endPeriodLabel);
+      if (!endMatch?.groups) {
+        return `Format bulan tidak valid. Gunakan MM-YYYY, contoh: 07-2026.\n${this.helpText()}`;
+      }
+
+      endMonth = Number(endMatch.groups.month);
+      endYear = Number(endMatch.groups.year);
+
+      if (endMonth < 1 || endMonth > 12) {
+        return `Bulan harus antara 01 dan 12.\n${this.helpText()}`;
+      }
+    }
+
+    const startIndex = startYear * 12 + (startMonth - 1);
+    const endIndex = endYear * 12 + (endMonth - 1);
+
+    if (endIndex < startIndex) {
+      return `Rentang bulan tidak valid. Bulan awal harus sebelum atau sama dengan bulan akhir.\n${this.helpText()}`;
+    }
+
+    if (endIndex - startIndex + 1 > MAX_REPORT_MONTHS) {
+      return `Rentang laporan maksimal ${MAX_REPORT_MONTHS} bulan sekaligus.\n${this.helpText()}`;
+    }
+
+    const periods: { year: number; month: number; label: string }[] = [];
+    for (let index = startIndex; index <= endIndex; index += 1) {
+      const year = Math.floor(index / 12);
+      const month = (index % 12) + 1;
+      periods.push({ year, month, label: `${String(month).padStart(2, "0")}-${year}` });
+    }
 
     try {
       const balances = await this.ledger.getBalances(userWhatsAppId);
       const currency = this.resolveReportCurrency(groups.currency?.toUpperCase(), balances);
 
-      await this.notify?.(userWhatsAppId, "⏳ Sedang membuat laporan keuangan bulanan kamu...");
+      await this.notify?.(userWhatsAppId, "Sedang membuat laporan keuangan...");
 
-      const { wallet, transactions } = await this.ledger.getMonthlyReportData(
-        userWhatsAppId,
-        currency,
-        periodStart,
-        periodEnd,
-      );
-      const reportData = buildMonthlyReport({
-        currency,
-        fractionDigits: this.fractionDigitsFor(currency),
-        periodLabel,
-        wallet,
-        transactions,
-      });
-      const spreadsheetUrl = await this.reportService.generateReport(reportData);
+      const reports = [];
+      for (const period of periods) {
+        const periodStart = new Date(Date.UTC(period.year, period.month - 1, 1, 0, 0, 0));
+        const periodEnd = new Date(Date.UTC(period.year, period.month, 0, 23, 59, 59, 999));
 
-      return `📊 Laporan ${currency} bulan ${periodLabel} sudah siap:\n${spreadsheetUrl}`;
+        const { wallet, transactions } = await this.ledger.getMonthlyReportData(
+          userWhatsAppId,
+          currency,
+          periodStart,
+          periodEnd,
+        );
+
+        reports.push(
+          buildMonthlyReport({
+            currency,
+            fractionDigits: this.fractionDigitsFor(currency),
+            periodLabel: period.label,
+            wallet,
+            transactions,
+          }),
+        );
+      }
+
+      const spreadsheetUrl = await this.reportService.generateReport(userWhatsAppId, reports);
+      const rangeLabel = endPeriodLabel ? `${startPeriodLabel} s/d ${endPeriodLabel}` : startPeriodLabel;
+
+      return `Laporan ${currency} bulan ${rangeLabel} sudah siap:\n${spreadsheetUrl}`;
     } catch (error) {
       if (error instanceof LedgerValidationError) {
         return `${error.message}\n${this.helpText()}`;
@@ -229,12 +276,12 @@ export class CommandRouter {
 
     if (balances.length === 0) {
       throw new LedgerValidationError(
-        'Belum ada saldo. Kirim "/open amount (mata uang disingkat, seperti IDR, AUD, SGD)" dulu.',
+        'Belum ada saldo. Kirim "/open amount (mata uang disingkat, seperti IDR, AUD, SGD)".',
       );
     }
 
     throw new LedgerValidationError(
-      "Kamu punya beberapa mata uang. Tentukan mata uang: /report MM-YYYY CURRENCY",
+      "Kamu punya beberapa mata uang. Tentukan mata uang: /report MM-YYYY (Mata Uang)",
     );
   }
 
@@ -253,7 +300,7 @@ export class CommandRouter {
 
     if (balances.length === 0) {
       throw new SpendingCommandError(
-        'Belum ada saldo. Kirim "/opening amount (mata uang disingkat, seperti IDR, AUD, SGD)"',
+        'Belum ada saldo. Kirim "/open amount (mata uang disingkat, seperti IDR, AUD, SGD)"',
       );
     }
 
@@ -268,7 +315,7 @@ export class CommandRouter {
 
   private formatBalances(balances: WalletBalance[]): string {
     if (balances.length === 0) {
-      return 'Belum ada saldo. Kirim "/opening amount (mata uang disingkat, seperti IDR, AUD, SGD)"';
+      return 'Belum ada saldo. Kirim "/open amount (mata uang disingkat, seperti IDR, AUD, SGD)"';
     }
 
     return balances
@@ -285,7 +332,7 @@ export class CommandRouter {
         "* *Menambah saldo*\n  `/add (jumlah) (mata uang)`\n\n" +
         "* *Catat pengeluaran*\n  `nama pengeluaran, kategori, harga, mata uang`\n\n" +
         "* *Cek saldo*\n  `/balance`\n\n" +
-        "* *Laporan bulanan (Google Sheets)*\n  `/report [MM-YYYY] [mata uang]`\n\n" +
+        "* *Laporan bulanan (Google Sheets)*\n  `/report [MM-YYYY[ - MM-YYYY]] [mata uang]`\n\n" +
         "* *Hapus wallet*\n  `/delete (mata uang)` lalu balas `CONFIRM DELETE (mata uang)`";
   }
 }

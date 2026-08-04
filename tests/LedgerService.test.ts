@@ -84,7 +84,7 @@ describe("LedgerService", () => {
     const service = new LedgerService(repository);
     const userWhatsAppId = "628123@example.whatsapp.net";
 
-    await service.addFunds(userWhatsAppId, "IDR", 200_000n, "message-001");
+    await service.addFunds(userWhatsAppId, "IDR", 200_000n, "message-001", new Date("2026-07-01T00:00:00Z"));
     await service.recordExpense({
       userWhatsAppId,
       sourceMessageId: "message-002",

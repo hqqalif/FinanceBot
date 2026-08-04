@@ -23,7 +23,13 @@ export type RecordExpenseResult = {
 
 export interface LedgerRepository {
   setOpeningBalance(userWhatsAppId: string, currency: string, amountMinor: bigint): Promise<void>;
-  addFunds(userWhatsAppId: string, currency: string, amountMinor: bigint, sourceMessageId: string): Promise<void>;
+  addFunds(
+    userWhatsAppId: string,
+    currency: string,
+    amountMinor: bigint,
+    sourceMessageId: string,
+    occurredAt: Date,
+  ): Promise<void>;
   recordExpense(input: RecordExpenseInput): Promise<RecordExpenseResult>;
   getBalances(userWhatsAppId: string): Promise<WalletBalance[]>;
   /** Returns true if a matching wallet existed and was deleted. */

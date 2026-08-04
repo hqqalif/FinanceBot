@@ -139,7 +139,7 @@ function buildDetailedLedger(
 ): DetailedLedgerRow[] {
   return transactions.map((transaction) => ({
     date: transaction.occurredAt.toISOString().slice(0, 10),
-    category: transaction.categoryName ?? "-",
+    category: transaction.categoryName ?? UNCATEGORIZED,
     description: transaction.description,
     amount: toMajor(transaction.amountMinor),
     currency,

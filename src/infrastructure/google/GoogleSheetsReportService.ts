@@ -5,9 +5,21 @@ import path from "node:path";
 import type { MonthlyReportService } from "../../domain/reporting/MonthlyReportService.js";
 import type { MonthlyReportData } from "../../domain/reporting/MonthlyReportBuilder.js";
 
+const SPREADSHEET_STORE_PATH = path.join(process.cwd(), "data", "report-spreadsheets.json");
+const DEFAULT_SHEET_TITLE = "Sheet1";
+
+type SpreadsheetStore = Record<string, string>;
+
 /**
  * Builds a Google Sheets monthly report using OAuth 2.0 User Credentials.
  * Generates standalone spreadsheets directly inside your personal Google Drive.
+ *
+ * A single spreadsheet is created once per (WhatsApp user, currency) pair and
+ * reused for every subsequent /report call - the spreadsheet id is persisted
+ * to `data/report-spreadsheets.json`. Each requested month gets its own sheet
+ * tab (named e.g. "07-2026") inside that same spreadsheet; regenerating a
+ * month that already has a tab clears and rewrites that tab in place instead
+ * of creating a new spreadsheet.
  */
 export class GoogleSheetsReportService implements MonthlyReportService {
   private readonly targetFolderId?: string;
@@ -34,13 +46,35 @@ export class GoogleSheetsReportService implements MonthlyReportService {
     return oAuth2Client;
   }
 
-  public async generateReport(report: MonthlyReportData): Promise<string> {
-    const authClient = await this.getAuthClient();
-    const sheets = google.sheets({ version: "v4", auth: authClient as never });
-    const drive = google.drive({ version: "v3", auth: authClient as never });
+  private async loadSpreadsheetStore(): Promise<SpreadsheetStore> {
+    try {
+      const raw = await fs.readFile(SPREADSHEET_STORE_PATH, "utf8");
+      return JSON.parse(raw) as SpreadsheetStore;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+      throw error;
+    }
+  }
 
-    const title = `FinanceBot Report - ${report.currency} - ${report.periodLabel}`;
+  private async saveSpreadsheetStore(store: SpreadsheetStore): Promise<void> {
+    await fs.mkdir(path.dirname(SPREADSHEET_STORE_PATH), { recursive: true });
+    await fs.writeFile(SPREADSHEET_STORE_PATH, JSON.stringify(store, null, 2), "utf8");
+  }
 
+  private async getOrCreateSpreadsheetId(
+    drive: ReturnType<typeof google.drive>,
+    userWhatsAppId: string,
+    currency: string,
+  ): Promise<{ spreadsheetId: string; isNewSpreadsheet: boolean }> {
+    const store = await this.loadSpreadsheetStore();
+    const key = `${userWhatsAppId}::${currency}`;
+    const existingId = store[key];
+
+    if (existingId) {
+      return { spreadsheetId: existingId, isNewSpreadsheet: false };
+    }
+
+    const title = `FinanceBot Report - ${currency}`;
     const createRequestBody: Record<string, unknown> = {
       name: title,
       mimeType: "application/vnd.google-apps.spreadsheet",
@@ -60,37 +94,111 @@ export class GoogleSheetsReportService implements MonthlyReportService {
       throw new Error("Google Drive API did not return a spreadsheet id.");
     }
 
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId,
-      requestBody: {
-        requests: [
-          { updateSheetProperties: { properties: { sheetId: 0, title: "Report" }, fields: "title" } },
-        ],
-      },
-    });
-
-    const { rows, layout } = buildRows(report);
-
-    await sheets.spreadsheets.values.update({
-      spreadsheetId,
-      range: "Report!A1",
-      valueInputOption: "RAW",
-      requestBody: { values: rows },
-    });
-
-    const formattingRequests = buildFormattingRequests(0, layout, report);
-
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId,
-      requestBody: {
-        requests: formattingRequests,
-      },
-    });
+    store[key] = spreadsheetId;
+    await this.saveSpreadsheetStore(store);
 
     await drive.permissions.create({
       fileId: spreadsheetId,
       requestBody: { role: "reader", type: "anyone" },
     });
+
+    return { spreadsheetId, isNewSpreadsheet: true };
+  }
+
+  public async generateReport(userWhatsAppId: string, reports: MonthlyReportData[]): Promise<string> {
+    if (reports.length === 0) {
+      throw new Error("generateReport requires at least one monthly report.");
+    }
+
+    const currency = reports[0].currency;
+    const authClient = await this.getAuthClient();
+    const sheets = google.sheets({ version: "v4", auth: authClient as never });
+    const drive = google.drive({ version: "v3", auth: authClient as never });
+
+    const { spreadsheetId, isNewSpreadsheet } = await this.getOrCreateSpreadsheetId(
+      drive,
+      userWhatsAppId,
+      currency,
+    );
+
+    const metadata = await sheets.spreadsheets.get({
+      spreadsheetId,
+      fields: "sheets(properties(sheetId,title),charts(chartId))",
+    });
+    const existingSheets = metadata.data.sheets ?? [];
+    const sheetIdByTitle = new Map(
+      existingSheets.map((sheet) => [sheet.properties?.title ?? "", sheet.properties?.sheetId ?? 0]),
+    );
+    const chartIdsBySheetId = new Map(
+      existingSheets.map((sheet) => [
+        sheet.properties?.sheetId ?? 0,
+        (sheet.charts ?? []).map((chart) => chart.chartId).filter((id): id is number => id != null),
+      ]),
+    );
+
+    // A brand new spreadsheet only has the Drive-provided default tab; claim
+    // it for the first requested month instead of leaving it as clutter.
+    if (isNewSpreadsheet) {
+      const defaultSheetId = sheetIdByTitle.get(DEFAULT_SHEET_TITLE) ?? 0;
+      const firstTitle = reports[0].periodLabel;
+
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+          requests: [
+            { updateSheetProperties: { properties: { sheetId: defaultSheetId, title: firstTitle }, fields: "title" } },
+          ],
+        },
+      });
+
+      sheetIdByTitle.delete(DEFAULT_SHEET_TITLE);
+      sheetIdByTitle.set(firstTitle, defaultSheetId);
+    }
+
+    for (const report of reports) {
+      const title = report.periodLabel;
+      let sheetId = sheetIdByTitle.get(title);
+
+      if (sheetId !== undefined) {
+        // Reusing an existing month tab: clear old values/charts before rewriting.
+        const chartIds = chartIdsBySheetId.get(sheetId) ?? [];
+        if (chartIds.length > 0) {
+          await sheets.spreadsheets.batchUpdate({
+            spreadsheetId,
+            requestBody: {
+              requests: chartIds.map((chartId) => ({ deleteEmbeddedObject: { objectId: chartId } })),
+            },
+          });
+        }
+        await sheets.spreadsheets.values.clear({ spreadsheetId, range: `'${title}'` });
+      } else {
+        const addResponse = await sheets.spreadsheets.batchUpdate({
+          spreadsheetId,
+          requestBody: { requests: [{ addSheet: { properties: { title } } }] },
+        });
+        sheetId = addResponse.data.replies?.[0]?.addSheet?.properties?.sheetId ?? undefined;
+        if (sheetId === undefined) {
+          throw new Error(`Google Sheets API did not return a sheet id for tab "${title}".`);
+        }
+        sheetIdByTitle.set(title, sheetId);
+      }
+
+      const { rows, layout } = buildRows(report);
+
+      await sheets.spreadsheets.values.update({
+        spreadsheetId,
+        range: `'${title}'!A1`,
+        valueInputOption: "RAW",
+        requestBody: { values: rows },
+      });
+
+      const formattingRequests = buildFormattingRequests(sheetId, layout, report);
+
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: { requests: formattingRequests },
+      });
+    }
 
     return `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`;
   }

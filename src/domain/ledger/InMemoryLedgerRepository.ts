@@ -32,6 +32,7 @@ export class InMemoryLedgerRepository implements LedgerRepository {
     currency: string,
     amountMinor: bigint,
     sourceMessageId: string,
+    occurredAt: Date,
   ): Promise<void> {
     if (this.transactionsByMessageId.has(sourceMessageId)) return;
 
@@ -45,7 +46,7 @@ export class InMemoryLedgerRepository implements LedgerRepository {
       description: "Top up",
       amountMinor,
       transactionType: "income",
-      occurredAt: new Date(),
+      occurredAt,
       transactionId: randomUUID(),
     });
   }

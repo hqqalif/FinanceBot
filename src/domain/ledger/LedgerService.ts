@@ -41,6 +41,7 @@ export class LedgerService {
     currency: string,
     amountMinor: bigint,
     sourceMessageId: string,
+    occurredAt: Date,
   ): Promise<void> {
     if (!CURRENCY_CODE_PATTERN.test(currency)) {
       throw new LedgerValidationError("Wallet currency must be a three-letter ISO 4217 code.");
@@ -50,7 +51,7 @@ export class LedgerService {
       throw new LedgerValidationError("Amount to add must be greater than zero.");
     }
 
-    await this.repository.addFunds(userWhatsAppId, currency, amountMinor, sourceMessageId);
+    await this.repository.addFunds(userWhatsAppId, currency, amountMinor, sourceMessageId, occurredAt);
   }
 
   public async recordExpense(input: RecordExpenseInput): Promise<RecordExpenseResult> {

@@ -114,7 +114,7 @@ export class BaileysProvider implements WhatsAppProvider {
           });
         } catch (error) {
           this.logger.error({ err: error, messageId }, "Unable to handle WhatsApp text message");
-          await this.sendText(senderId, "I could not record that message. Please try again.");
+          await this.sendText(senderId, "Terjadi kesalahan, mohon laporkan ke nomor +6289667851611");
         }
       }
     });

@@ -64,6 +64,7 @@ export class PostgresLedgerRepository implements LedgerRepository {
     currency: string,
     amountMinor: bigint,
     sourceMessageId: string,
+    occurredAt: Date,
   ): Promise<void> {
     const client = await this.pool.connect();
 
@@ -90,9 +91,9 @@ export class PostgresLedgerRepository implements LedgerRepository {
       await client.query(
         `INSERT INTO transactions
            (user_id, wallet_id, category_id, source_message_id, transaction_type, description, amount_minor, occurred_at)
-         VALUES ($1, $2, NULL, $3, 'income', 'Top up', $4, NOW())
+         VALUES ($1, $2, NULL, $3, 'income', 'Top up', $4, $5)
          ON CONFLICT (source_message_id) DO NOTHING`,
-        [userId, walletResult.rows[0].id, sourceMessageId, amountMinor.toString()],
+        [userId, walletResult.rows[0].id, sourceMessageId, amountMinor.toString(), occurredAt],
       );
       await client.query("COMMIT");
     } catch (error) {
