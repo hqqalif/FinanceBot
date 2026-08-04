@@ -30,12 +30,6 @@ export function parseSpendingCommand(
 ): SpendingCommand {
   const parts = message.split(",");
 
-  if (parts.length !== 3 && parts.length !== 4) {
-    throw new SpendingCommandError(
-      "Template utama catat pengeluaran:\n`Nama pengeluaran, Kategori, Harga, Mata Uang`\nSemua data di dalamnya tidak boleh memakai koma \n",
-    );
-  }
-
   const [rawDescription, rawCategory, rawAmount, rawCurrency] = parts.map((part) => part.trim());
 
   if (!rawDescription || !rawCategory || !rawAmount) {

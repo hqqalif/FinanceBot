@@ -214,7 +214,7 @@ export class CommandRouter {
     const endIndex = endYear * 12 + (endMonth - 1);
 
     if (endIndex < startIndex) {
-      return `Rentang bulan tidak valid. Bulan awal harus sebelum atau sama dengan bulan akhir.\n${this.helpText()}`;
+      return `Bulan awal harus sebelum atau sama dengan bulan akhir.\n${this.helpText()}`;
     }
 
     if (endIndex - startIndex + 1 > MAX_REPORT_MONTHS) {
@@ -327,12 +327,12 @@ export class CommandRouter {
   }
 
   private helpText(): string {
-    return "Hai, ini adalah command yang bisa digunakan:\n\n" +
+    return "List command yang bisa digunakan:\n\n" +
         "* *Membuka saldo pertama kali*\n  `/open (jumlah) (mata uang)`\n\n" +
         "* *Menambah saldo*\n  `/add (jumlah) (mata uang)`\n\n" +
-        "* *Catat pengeluaran*\n  `nama pengeluaran, kategori, harga, mata uang`\n\n" +
+        "* *Catat pengeluaran*\n  `Nama pengeluaran, kategori, harga, mata uang`\n `Contoh: Nasi, Makanan, 5000, IDR`\n\n" +
         "* *Cek saldo*\n  `/balance`\n\n" +
-        "* *Laporan bulanan (Google Sheets)*\n  `/report [MM-YYYY[ - MM-YYYY]] [mata uang]`\n\n" +
-        "* *Hapus wallet*\n  `/delete (mata uang)` lalu balas `CONFIRM DELETE (mata uang)`";
+        "* *Laporan bulanan (Google Sheets)*\n  `/report (MM-YYYY - MM-YYYY) (mata uang)`\n\n" +
+        "* *Hapus wallet*\n  `/delete (mata uang)`";
   }
 }
