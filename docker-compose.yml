@@ -8,16 +8,24 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      BAILEYS_AUTH_DIRECTORY: /app/data/baileys-auth
       GOOGLE_DRIVE_FOLDER_ID: ${GOOGLE_DRIVE_FOLDER_ID}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      PORT: ${PORT:-3000}
+      WHATSAPP_WEBHOOK_PATH: ${WHATSAPP_WEBHOOK_PATH:-/webhook}
+      WHATSAPP_CLOUD_API_TOKEN: ${WHATSAPP_CLOUD_API_TOKEN}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID}
+      WHATSAPP_WEBHOOK_VERIFY_TOKEN: ${WHATSAPP_WEBHOOK_VERIFY_TOKEN}
+      WHATSAPP_APP_SECRET: ${WHATSAPP_APP_SECRET}
+    ports:
+      # Meta needs to reach this port over HTTPS to deliver webhooks - put a
+      # reverse proxy (nginx/Caddy) with a real TLS cert in front of it.
+      - "127.0.0.1:${PORT:-3000}:3000"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     volumes:
-      - baileys_auth:/app/data/baileys-auth
       # Mount Google OAuth files from host so token refreshes persist
       - ./oauth_credentials.json:/app/oauth_credentials.json:ro
       - ./token.json:/app/token.json
@@ -56,5 +64,4 @@ services:
       retries: 10
 
 volumes:
-  baileys_auth:
   postgres_data:

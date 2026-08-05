@@ -20,7 +20,4 @@ RUN npm ci --omit=dev
 
 COPY --from=build /app/dist ./dist
 
-# Create folder for Baileys auth if it doesn't exist
-RUN mkdir -p /app/data/baileys-auth
-
 CMD ["node", "dist/main.js"]

@@ -11,17 +11,14 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^7.0.0-rc.13",
     "dotenv": "^17.4.2",
     "googleapis": "^173.0.0",
     "pg": "^8.16.3",
-    "pino": "^10.3.1",
-    "qrcode-terminal": "^0.12.0"
+    "pino": "^10.3.1"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "@types/pg": "^8.15.5",
-    "@types/qrcode-terminal": "^0.12.2",
     "tsx": "^4.20.5",
     "typescript": "^5.8.3",
     "vitest": "^3.2.4"
