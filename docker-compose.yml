@@ -16,10 +16,8 @@ services:
       WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID}
       WHATSAPP_WEBHOOK_VERIFY_TOKEN: ${WHATSAPP_WEBHOOK_VERIFY_TOKEN}
       WHATSAPP_APP_SECRET: ${WHATSAPP_APP_SECRET}
-    ports:
-      # Meta needs to reach this port over HTTPS to deliver webhooks - put a
-      # reverse proxy (nginx/Caddy) with a real TLS cert in front of it.
-      - "127.0.0.1:${PORT:-3000}:3000"
+    expose:
+      - "3000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -29,6 +27,20 @@ services:
       # Mount Google OAuth files from host so token refreshes persist
       - ./oauth_credentials.json:/app/oauth_credentials.json:ro
       - ./token.json:/app/token.json
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: financebot_caddy
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - bot
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
 
   postgres:
     image: postgres:17-alpine
@@ -65,3 +77,5 @@ services:
 
 volumes:
   postgres_data:
+  caddy_data:
+  caddy_config:
