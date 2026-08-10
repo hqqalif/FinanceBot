@@ -136,7 +136,10 @@ export class CloudApiProvider implements WhatsAppProvider {
             });
           } catch (error) {
             this.logger.error({ err: error, messageId: message.id }, "Unable to handle WhatsApp text message");
-            await this.sendText(message.from, "Terjadi kesalahan, mohon laporkan ke nomor +6289667851611");
+            await this.sendText(
+              message.from,
+              "Terjadi kesalahan saat memproses pesanmu. Coba lagi nanti atau hubungi admin.",
+            );
           }
         }
       }

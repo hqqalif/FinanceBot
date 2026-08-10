@@ -25,7 +25,7 @@ services:
         condition: service_healthy
     volumes:
       # Mount Google OAuth files from host so token refreshes persist
-      - ./oauth_credentials.json:/app/oauth_credentials.json:ro
+      - ./oauth-credentials.json:/app/oauth-credentials.json:ro
       - ./token.json:/app/token.json
 
   caddy:
